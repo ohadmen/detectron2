@@ -1,4 +1,5 @@
 _BASE_: "Base-DensePose-RCNN-FPN.yaml"
+VERSION: 2
 MODEL:
   WEIGHTS: "detectron2://ImageNetPretrained/MSRA/R-50.pkl"
   RESNETS:
