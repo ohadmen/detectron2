@@ -104,7 +104,7 @@ class InferenceAction(Action):
         context = cls.create_context(args)
         extractor = context["extractor"]
         k=-1
-        while True:
+        while zv.getLastKeyStroke()!=16777216:#ESC
             img,_ = rs.get_xyzirgb()
 
             if img is None:
