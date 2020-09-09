@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-
+import  matplotlib.pyplot as plt
 import argparse
 import glob
 import logging
@@ -8,8 +8,12 @@ import os
 import pickle
 import sys
 from typing import Any, ClassVar, Dict, List
+
+import cv2
 import torch
 
+from common.gui.pyzviewutils.add_color import add_color
+from common.gui.pyzviewutils.add_mesh import add_mesh
 from detectron2.config import get_cfg
 from detectron2.data.detection_utils import read_image
 from detectron2.engine.defaults import DefaultPredictor
@@ -28,6 +32,9 @@ from densepose.vis.densepose import (
     DensePoseResultsVVisualizer,
 )
 from densepose.vis.extractor import CompoundExtractor, create_extractor
+
+
+from tools.decode_png_data import decode_png_data
 
 DOC = """Apply Net - a tool to print / visualize DensePose results
 """
@@ -71,6 +78,57 @@ class InferenceAction(Action):
             default=[],
             nargs=argparse.REMAINDER,
         )
+
+
+
+    @classmethod
+    def execute_on_stream(cls: type, args: argparse.Namespace):
+
+
+        from common.io.realsense_wrapper import RealSenseWrapper
+        import cv2
+        from common.gui import pyzview
+        import  numpy as np
+
+        zv = pyzview.interface()
+        zv.removeShape(-1)
+
+
+        rs = RealSenseWrapper(origin='depth')
+        logger.info(f"Loading config from {args.cfg}")
+        opts = []
+        cfg = cls.setup_config(args.cfg, args.model, args, opts)
+        logger.info(f"Loading model from {args.model}")
+        predictor = DefaultPredictor(cfg)
+        logger.info(f"Loading data from {args.input}")
+        context = cls.create_context(args)
+        extractor = context["extractor"]
+        k=-1
+        while True:
+            img,_ = rs.get_xyzirgb()
+
+            if img is None:
+                print("failed to grab frame")
+                break
+            rgbimg = (img[:,:,3:]*255)
+            out_img = rgbimg*0
+            with torch.no_grad():
+                outputs = predictor(rgbimg)["instances"]
+                data = extractor(outputs)
+
+                for j in range(len(data[0].results)):
+                    iuv_arr = np.moveaxis(decode_png_data(*data[0].results[j]),0,-1)
+                    bbox_xywh = data[0].boxes_xywh[j]
+                    bbox_xywh = np.array(bbox_xywh).astype(int)
+                    out_img[bbox_xywh[1]:bbox_xywh[1]+bbox_xywh[3],bbox_xywh[0]:bbox_xywh[0]+bbox_xywh[2],:]=iuv_arr
+
+            out_img = out_img/[24,255,255]
+            if k == -1:
+                v, f = add_mesh(img)
+                k = zv.addColoredMesh("mesh", v, f)
+            else:
+                zv.updateColoredPoints(k, add_color(img[:,:,:3], out_img))
+
 
     @classmethod
     def execute(cls: type, args: argparse.Namespace):
@@ -199,7 +257,7 @@ class ShowAction(InferenceAction):
     def add_parser(cls: type, subparsers: argparse._SubParsersAction):
         parser = subparsers.add_parser(cls.COMMAND, help="Visualize selected entries")
         cls.add_arguments(parser)
-        parser.set_defaults(func=cls.execute)
+        parser.set_defaults(func=cls.execute_on_stream)
 
     @classmethod
     def add_arguments(cls: type, parser: argparse.ArgumentParser):
@@ -262,6 +320,9 @@ class ShowAction(InferenceAction):
         cv2.imwrite(out_fname, image_vis)
         logger.info(f"Output saved to {out_fname}")
         context["entry_idx"] += 1
+
+
+
 
     @classmethod
     def postexecute(cls: type, context: Dict[str, Any]):
